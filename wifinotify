@@ -1,0 +1,118 @@
+#!/usr/bin/python
+
+#Threaded version of the wifinotifier
+
+import time, os, pynotify, sys, threading
+
+#global vars
+devices = {}	#read from the known_devices.wifi file and populate the dictionary
+icon = "/usr/share/icons/ubuntu-mono-dark/status/24/nm-device-wireless.svg"
+icond = "/usr/share/icons/ubuntu-mono-dark/status/24/nm-no-connection.svg"
+
+#global symbol for threads
+NOTIFIER = True
+QUERIER = True
+
+
+class WifiNotifier(threading.Thread) :
+	def load_device_list(self) :
+		dev_file = open("known_devices.wifi","r").read()
+		if dev_file:
+			known_devices = dev_file.split("\n")
+			del known_devices[0]
+			for dev in known_devices :
+				devices[dev[:17]]=[dev[18:],0]
+
+	def run(self) :
+		self.load_device_list()
+		
+		while( NOTIFIER ):
+			k = os.popen("iw dev wlan0 station dump | grep Station | awk '{ print $2 }'")
+			macs = k.read().split("\n")
+			del macs[-1]	
+			for mac in macs:
+				if mac in devices :
+					if (devices[mac][1] == 0) : 
+						#print devices[mac][0]
+						devices[mac][1] = 1
+						pynotify.init("Checker")
+						r=pynotify.Notification("%s Connected" % devices[mac][0], "MAC: %s" % mac,icon)
+						r.show()
+				else :
+					pynotify.init("Checker")
+					r=pynotify.Notification("A New Device Connected", "MAC: %s" % (mac),icon)
+					r.show()
+					devices[mac] = ["New Device %s" % (mac),1]
+					modifier = NameModifier(mac);
+					modifier.start()
+
+			for each in devices:
+				print each,devices[each][0],devices[each][1]
+
+			if macs :
+				for dev in devices :
+					if (dev not in macs) and devices[dev][1] :
+						devices[dev][1] = 0
+						pynotify.init("Checker")
+						r=pynotify.Notification("%s Disconnected" % devices[dev][0], "",icond)
+						r.show()
+			else :
+				for dev in devices :
+					if(devices[dev][1]) :
+						devices[dev][1] = 0
+						pynotify.init("Checker")
+						r=pynotify.Notification("%s Disconnected" % devices[dev][0], "",icond)
+						r.show()
+	
+			time.sleep(5)
+				
+		else :
+			f = open("known_devices.wifi","w");
+			for dev in devices:
+				string = "%s %s\n" % (dev,devices[dev][0])
+				f.write(string)
+			#thread.exit()
+
+class NameModifier(threading.Thread):
+	def __init__ (self, mac):
+		threading.Thread.__init__(self)
+		self.mac = mac
+	def run(self):
+		self.name = raw_input("Enter pet name of Device:")
+		devices[self.mac][0] = self.name
+
+
+class WifiQuery(threading.Thread):
+	def __init__(self):
+		threading.Thread.__init__(self)
+
+	def run(self):
+		global QUERIER
+		while(QUERIER) :
+			command = raw_input(">>>")
+			if command == "show_devices" :
+				for dev in devices:
+					print dev, devices[dev][0], devices[dev][1]
+			elif command == "exit" :
+				QUERIER = False
+
+
+if __name__ == "__main__" :
+	#main thread
+	#main thread only can capture the KeyboradInterrupt so set a global variable to terminate the child thread 
+	notifier = WifiNotifier()
+	#querier = WifiQuery()
+	notifier.start()
+	#querier.start()
+	try:
+		while(True):
+			pass
+
+	except (KeyboardInterrupt, SystemExit):
+		print "Main Thread Got KeyboradInterrupt"
+		NOTIFIER = False
+		QUERIER = False
+		notifier.join()
+		#querier.join()
+
+print "Bye"
